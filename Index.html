@@ -1,0 +1,613 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>現場計數主程式｜測試版</title>
+  <style>
+    :root{
+      --bg:#0f172a;--panel:#111827;--panel2:#1f2937;--txt:#f8fafc;--muted:#94a3b8;--line:#334155;--good:#22c55e;--warn:#f59e0b;--bad:#ef4444;
+    }
+    *{box-sizing:border-box}
+    body{margin:0;font-family:"Microsoft JhengHei",system-ui,sans-serif;background:linear-gradient(180deg,#0b1220,#111827);color:var(--txt)}
+    .wrap{max-width:1280px;margin:0 auto;padding:16px}
+    .title{font-size:28px;font-weight:800;margin:8px 0 4px}
+    .sub{color:var(--muted);margin-bottom:16px}
+    .grid{display:grid;grid-template-columns:1.45fr .9fr;gap:16px}
+    .card{background:rgba(17,24,39,.9);border:1px solid var(--line);border-radius:18px;padding:14px;box-shadow:0 10px 30px rgba(0,0,0,.22)}
+    .viewer{position:relative;background:#020617;border-radius:16px;overflow:hidden;min-height:320px;border:1px solid #1e293b}
+    video,canvas{width:100%;height:auto;display:block;background:#000}
+    #overlay{position:absolute;left:0;top:0;pointer-events:none}
+    .actions,.quick{display:flex;flex-wrap:wrap;gap:10px;margin-top:12px}
+    button,select,input[type="text"],input[type="number"]{
+      border-radius:12px;border:1px solid #475569;background:#0f172a;color:#fff;padding:10px 12px;font-size:16px
+    }
+    button{cursor:pointer;background:#1d4ed8;border-color:#2563eb;font-weight:700}
+    button.secondary{background:#0f172a}
+    button.good{background:#15803d;border-color:#16a34a}
+    button.warn{background:#b45309;border-color:#d97706}
+    button.bad{background:#b91c1c;border-color:#dc2626}
+    button:disabled{opacity:.5;cursor:not-allowed}
+    .statGrid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:12px}
+    .stat{background:#0b1220;border:1px solid var(--line);border-radius:16px;padding:12px}
+    .stat .k{color:var(--muted);font-size:13px}
+    .stat .v{font-size:34px;font-weight:800;margin-top:2px}
+    .two{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+    .field{margin-bottom:10px}
+    .field label{display:block;margin-bottom:6px;color:#cbd5e1;font-size:14px}
+    .sliderRow{display:grid;grid-template-columns:110px 1fr 64px;align-items:center;gap:10px;margin:8px 0}
+    input[type="range"]{width:100%}
+    table{width:100%;border-collapse:collapse;margin-top:10px;font-size:14px}
+    th,td{border-bottom:1px solid #334155;padding:8px;text-align:left}
+    th{color:#cbd5e1}
+    .hint{color:var(--muted);font-size:13px;line-height:1.5}
+    .badge{display:inline-block;padding:4px 8px;border-radius:999px;border:1px solid #475569;color:#cbd5e1;font-size:12px;margin-right:6px;margin-bottom:6px}
+    .footer{margin-top:10px;color:#94a3b8;font-size:12px}
+    .statusBar{margin-top:10px;padding:10px 12px;border-radius:12px;border:1px solid var(--line);background:#0b1220;color:#cbd5e1;font-size:14px;line-height:1.5;white-space:pre-wrap}
+    .statusBar.ok{border-color:#166534;color:#dcfce7}
+    .statusBar.warn{border-color:#92400e;color:#fde68a}
+    .statusBar.bad{border-color:#991b1b;color:#fecaca}
+    @media (max-width: 980px){.grid{grid-template-columns:1fr}.statGrid{grid-template-columns:1fr 1fr 1fr}}
+    @media (max-width: 680px){.statGrid,.two{grid-template-columns:1fr 1fr}.title{font-size:22px}}
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <div class="title">現場計數主程式｜測試版</div>
+  <div class="sub">離線可用，可先拿來測蝦仁、魚排、肉排、豆包等單層品項。先拍照，再做輪廓計數，可手動修正與匯出紀錄。</div>
+
+  <div class="grid">
+    <div class="card">
+      <div class="viewer" id="viewerBox">
+        <video id="video" autoplay playsinline muted></video>
+        <canvas id="previewCanvas" hidden></canvas>
+        <canvas id="overlay"></canvas>
+      </div>
+      <div class="actions">
+        <button id="startBtn">開啟相機</button>
+        <button id="switchBtn" class="secondary">切換前/後鏡頭</button>
+        <button id="snapBtn" class="good" disabled>拍照計數</button>
+        <button id="liveBtn" class="secondary" disabled>顯示原圖</button>
+        <button id="retryBtn" class="secondary" disabled>重拍</button>
+      </div>
+      <div class="quick">
+        <button id="minusBtn" class="warn">-1</button>
+        <button id="plusBtn" class="good">+1</button>
+        <button id="saveBtn" class="secondary">儲存本筆</button>
+        <button id="clearBtn" class="bad">清空紀錄</button>
+        <button id="exportBtn" class="secondary">匯出CSV</button>
+      </div>
+      <div id="statusBar" class="statusBar warn">狀態：尚未開啟相機</div>
+      <div class="footer">建議拍攝條件：<span class="badge">正上方拍</span><span class="badge">單層分開</span><span class="badge">背景單純</span><span class="badge">固定燈光</span><span class="badge">先測黑底/白底哪個較穩</span></div>
+    </div>
+
+    <div class="card">
+      <div class="statGrid">
+        <div class="stat"><div class="k">本次顆數</div><div class="v" id="countNow">0</div></div>
+        <div class="stat"><div class="k">紀錄筆數</div><div class="v" id="recordCount">0</div></div>
+        <div class="stat"><div class="k">累計顆數</div><div class="v" id="totalCount">0</div></div>
+      </div>
+
+      <div class="two">
+        <div>
+          <div class="field">
+            <label>品項名稱</label>
+            <input id="itemName" type="text" placeholder="例如：蝦仁 / 魚排 / 肉排" value="蝦仁">
+          </div>
+          <div class="field">
+            <label>批號/備註</label>
+            <input id="batchNote" type="text" placeholder="例如：A批 / 上午測試 / 1號烤盤">
+          </div>
+          <div class="field">
+            <label>背景模式</label>
+            <select id="detectMode">
+              <option value="darkObject">深色物件 / 淺色背景</option>
+              <option value="lightObject">淺色物件 / 深色背景</option>
+              <option value="auto" selected>自動判定（先用這個）</option>
+            </select>
+          </div>
+        </div>
+        <div>
+          <div class="field">
+            <label>偵測縮放</label>
+            <select id="scaleSelect">
+              <option value="1">高精度（較慢）</option>
+              <option value="2" selected>標準</option>
+              <option value="3">快速</option>
+              <option value="4">極速</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>日期時間</label>
+            <input id="timeText" type="text" readonly>
+          </div>
+          <div class="field">
+            <label>是否顯示框線</label>
+            <select id="drawBox">
+              <option value="1" selected>顯示</option>
+              <option value="0">不顯示</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <div class="sliderRow"><div>亮度門檻</div><input id="thresholdRange" type="range" min="20" max="235" value="135"><div id="thresholdVal">135</div></div>
+      <div class="sliderRow"><div>最小面積</div><input id="minAreaRange" type="range" min="20" max="5000" value="180"><div id="minAreaVal">180</div></div>
+      <div class="sliderRow"><div>去雜訊強度</div><input id="denoiseRange" type="range" min="0" max="4" value="1"><div id="denoiseVal">1</div></div>
+
+      <div class="hint">
+        調整方法：<br>
+        1. 若把一隻物件切成好幾塊，先把「亮度門檻」往中間拉。<br>
+        2. 若把小雜點也算進去，拉高「最小面積」。<br>
+        3. 若畫面很多水光、反光雜訊，提高「去雜訊強度」。
+      </div>
+
+      <table>
+        <thead>
+          <tr><th>時間</th><th>品項</th><th>顆數</th><th>備註</th></tr>
+        </thead>
+        <tbody id="recordBody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+  const video = document.getElementById('video');
+  const previewCanvas = document.getElementById('previewCanvas');
+  const overlay = document.getElementById('overlay');
+  const pctx = previewCanvas.getContext('2d', { willReadFrequently: true });
+  const octx = overlay.getContext('2d');
+
+  const startBtn = document.getElementById('startBtn');
+  const switchBtn = document.getElementById('switchBtn');
+  const snapBtn = document.getElementById('snapBtn');
+  const retryBtn = document.getElementById('retryBtn');
+  const liveBtn = document.getElementById('liveBtn');
+  const plusBtn = document.getElementById('plusBtn');
+  const minusBtn = document.getElementById('minusBtn');
+  const saveBtn = document.getElementById('saveBtn');
+  const clearBtn = document.getElementById('clearBtn');
+  const exportBtn = document.getElementById('exportBtn');
+  const statusBar = document.getElementById('statusBar');
+
+  const countNow = document.getElementById('countNow');
+  const recordCount = document.getElementById('recordCount');
+  const totalCount = document.getElementById('totalCount');
+  const recordBody = document.getElementById('recordBody');
+  const itemName = document.getElementById('itemName');
+  const batchNote = document.getElementById('batchNote');
+  const timeText = document.getElementById('timeText');
+  const detectMode = document.getElementById('detectMode');
+  const drawBox = document.getElementById('drawBox');
+  const scaleSelect = document.getElementById('scaleSelect');
+
+  const thresholdRange = document.getElementById('thresholdRange');
+  const minAreaRange = document.getElementById('minAreaRange');
+  const denoiseRange = document.getElementById('denoiseRange');
+  const thresholdVal = document.getElementById('thresholdVal');
+  const minAreaVal = document.getElementById('minAreaVal');
+  const denoiseVal = document.getElementById('denoiseVal');
+
+  let stream = null;
+  let useFront = false;
+  let lastImageData = null;
+  let lastShotBitmap = null;
+  let currentCount = 0;
+  let records = [];
+
+  const STORAGE_KEY = 'counter_master_records_v1';
+
+
+  function setStatus(msg, type = "warn") {
+    statusBar.textContent = msg;
+    statusBar.className = `statusBar ${type}`;
+  }
+
+  function isSecureReady() {
+    return window.isSecureContext || location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+  }
+
+  function updateClock() {
+    const now = new Date();
+    timeText.value = formatTime(now);
+  }
+  setInterval(updateClock, 1000);
+  updateClock();
+
+  function formatTime(d) {
+    const p = n => String(n).padStart(2,'0');
+    return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+  }
+
+  function syncSliderLabels(){
+    thresholdVal.textContent = thresholdRange.value;
+    minAreaVal.textContent = minAreaRange.value;
+    denoiseVal.textContent = denoiseRange.value;
+  }
+  [thresholdRange,minAreaRange,denoiseRange].forEach(el=>el.addEventListener('input', syncSliderLabels));
+  syncSliderLabels();
+
+  async function startCamera() {
+    if (!isSecureReady()) {
+      setStatus('狀態：目前不是安全網址，請改用 https:// 的 github.io 網址開啟。', 'bad');
+      return;
+    }
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      setStatus('狀態：目前瀏覽器不支援相機 API，請改用 Chrome。', 'bad');
+      return;
+    }
+
+    stopCamera();
+    setStatus('狀態：正在開啟相機…', 'warn');
+
+    const tries = [
+      { video: { facingMode: useFront ? 'user' : { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false },
+      { video: { width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false }
+    ];
+
+    let lastErr = null;
+    for (const constraints of tries) {
+      try {
+        stream = await navigator.mediaDevices.getUserMedia(constraints);
+        break;
+      } catch (e) {
+        lastErr = e;
+      }
+    }
+
+    if (!stream) {
+      const msg = lastErr?.message || '未知錯誤';
+      setStatus(`狀態：無法開啟相機。可能是權限被拒絕、相機被其他 App 佔用，或瀏覽器限制。\n錯誤：${msg}`, 'bad');
+      return;
+    }
+
+    video.srcObject = stream;
+    video.style.display = 'block';
+
+    try {
+      await new Promise((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error('等待相機畫面逾時')), 6000);
+        video.onloadedmetadata = async () => {
+          try {
+            await video.play();
+            clearTimeout(timer);
+            resolve();
+          } catch (err) {
+            clearTimeout(timer);
+            reject(err);
+          }
+        };
+      });
+
+      resizeOverlay();
+      snapBtn.disabled = false;
+      liveBtn.disabled = false;
+      retryBtn.disabled = true;
+      startBtn.textContent = '重新開啟相機';
+      renderLiveHint();
+      setStatus(`狀態：相機已開啟，解析度 ${video.videoWidth || '-'} x ${video.videoHeight || '-'}`, 'ok');
+    } catch (e) {
+      setStatus(`狀態：相機已授權，但即時畫面未成功顯示。\n錯誤：${e.message}`, 'bad');
+    }
+  }
+
+  function stopCamera() {
+    if (stream) {
+      stream.getTracks().forEach(t => t.stop());
+      stream = null;
+    }
+    video.pause();
+    video.srcObject = null;
+  }
+
+  function resizeOverlay() {
+    const box = document.getElementById('viewerBox');
+    overlay.width = box.clientWidth;
+    overlay.height = box.clientHeight;
+  }
+  window.addEventListener('resize', resizeOverlay);
+
+  function renderLiveHint(){
+    octx.clearRect(0,0,overlay.width,overlay.height);
+    octx.strokeStyle = 'rgba(34,197,94,.9)';
+    octx.lineWidth = 2;
+    octx.strokeRect(18,18,overlay.width-36,overlay.height-36);
+    octx.fillStyle = 'rgba(15,23,42,.72)';
+    octx.fillRect(20,20,230,38);
+    octx.fillStyle = '#e2e8f0';
+    octx.font = '16px Microsoft JhengHei';
+    octx.fillText('建議把物件放在綠框內拍攝', 32, 45);
+  }
+
+  async function captureFrame() {
+    if (!video.videoWidth || !video.videoHeight) {
+      setStatus('狀態：尚未取得相機畫面，請先重新開啟相機。', 'bad');
+      return;
+    }
+    const w = video.videoWidth;
+    const h = video.videoHeight;
+    previewCanvas.width = w;
+    previewCanvas.height = h;
+    pctx.drawImage(video, 0, 0, w, h);
+    lastShotBitmap = pctx.getImageData(0,0,w,h);
+    lastImageData = pctx.getImageData(0,0,w,h);
+    retryBtn.disabled = false;
+    processCurrentImage();
+  }
+
+  function processCurrentImage() {
+    if (!lastImageData) return;
+    const scale = parseInt(scaleSelect.value,10);
+    const threshold = parseInt(thresholdRange.value,10);
+    const minArea = parseInt(minAreaRange.value,10);
+    const denoise = parseInt(denoiseRange.value,10);
+
+    const src = lastShotBitmap;
+    const sw = src.width, sh = src.height;
+    const dw = Math.max(1, Math.floor(sw / scale));
+    const dh = Math.max(1, Math.floor(sh / scale));
+
+    const small = downsample(src, sw, sh, dw, dh);
+    const gray = toGray(small.data);
+    const mode = resolveMode(gray, detectMode.value, threshold);
+    let mask = binarize(gray, dw, dh, threshold, mode);
+
+    for (let i=0;i<denoise;i++) {
+      mask = majorityFilter(mask, dw, dh);
+    }
+
+    const comps = connectedComponents(mask, dw, dh, minArea);
+    currentCount = comps.length;
+    countNow.textContent = currentCount;
+
+    drawResult(src, comps, scale, mode, threshold, mask, dw, dh);
+  }
+
+  function downsample(src, sw, sh, dw, dh) {
+    const out = new Uint8ClampedArray(dw * dh * 4);
+    const srcData = src.data;
+    for (let y=0; y<dh; y++) {
+      const sy = Math.floor(y * sh / dh);
+      for (let x=0; x<dw; x++) {
+        const sx = Math.floor(x * sw / dw);
+        const sidx = (sy * sw + sx) * 4;
+        const didx = (y * dw + x) * 4;
+        out[didx] = srcData[sidx];
+        out[didx+1] = srcData[sidx+1];
+        out[didx+2] = srcData[sidx+2];
+        out[didx+3] = 255;
+      }
+    }
+    return { data: out };
+  }
+
+  function toGray(rgba) {
+    const gray = new Uint8Array(rgba.length / 4);
+    for (let i=0, j=0; i<rgba.length; i+=4, j++) {
+      gray[j] = Math.round(0.299*rgba[i] + 0.587*rgba[i+1] + 0.114*rgba[i+2]);
+    }
+    return gray;
+  }
+
+  function resolveMode(gray, mode, threshold) {
+    if (mode !== 'auto') return mode;
+    let dark = 0, light = 0;
+    for (let i=0;i<gray.length;i++) {
+      if (gray[i] < threshold) dark++; else light++;
+    }
+    return dark < light ? 'darkObject' : 'lightObject';
+  }
+
+  function binarize(gray, w, h, threshold, mode) {
+    const mask = new Uint8Array(w*h);
+    for (let i=0;i<gray.length;i++) {
+      if (mode === 'darkObject') {
+        mask[i] = gray[i] < threshold ? 1 : 0;
+      } else {
+        mask[i] = gray[i] > threshold ? 1 : 0;
+      }
+    }
+    return mask;
+  }
+
+  function majorityFilter(mask, w, h) {
+    const out = new Uint8Array(mask.length);
+    for (let y=0; y<h; y++) {
+      for (let x=0; x<w; x++) {
+        let sum = 0;
+        for (let dy=-1; dy<=1; dy++) {
+          for (let dx=-1; dx<=1; dx++) {
+            const nx = x+dx, ny = y+dy;
+            if (nx>=0 && ny>=0 && nx<w && ny<h) sum += mask[ny*w+nx];
+          }
+        }
+        out[y*w+x] = sum >= 5 ? 1 : 0;
+      }
+    }
+    return out;
+  }
+
+  function connectedComponents(mask, w, h, minArea) {
+    const seen = new Uint8Array(mask.length);
+    const comps = [];
+    const qx = new Int32Array(mask.length);
+    const qy = new Int32Array(mask.length);
+    for (let y=0; y<h; y++) {
+      for (let x=0; x<w; x++) {
+        const idx = y*w+x;
+        if (!mask[idx] || seen[idx]) continue;
+        let head = 0, tail = 0;
+        qx[tail] = x; qy[tail] = y; tail++;
+        seen[idx] = 1;
+        let area = 0, minX = x, minY = y, maxX = x, maxY = y;
+        while (head < tail) {
+          const cx = qx[head], cy = qy[head]; head++;
+          area++;
+          if (cx < minX) minX = cx; if (cy < minY) minY = cy;
+          if (cx > maxX) maxX = cx; if (cy > maxY) maxY = cy;
+          const neighbors = [[1,0],[-1,0],[0,1],[0,-1]];
+          for (const [dx,dy] of neighbors) {
+            const nx = cx + dx, ny = cy + dy;
+            if (nx<0||ny<0||nx>=w||ny>=h) continue;
+            const nidx = ny*w+nx;
+            if (mask[nidx] && !seen[nidx]) {
+              seen[nidx] = 1;
+              qx[tail] = nx; qy[tail] = ny; tail++;
+            }
+          }
+        }
+        if (area >= minArea) comps.push({ area, minX, minY, maxX, maxY });
+      }
+    }
+    return comps;
+  }
+
+  function drawResult(src, comps, scale, mode, threshold, mask, mw, mh) {
+    previewCanvas.width = src.width;
+    previewCanvas.height = src.height;
+    pctx.putImageData(src, 0, 0);
+
+    if (drawBox.value === '1') {
+      pctx.lineWidth = Math.max(2, Math.round(src.width / 500));
+      pctx.font = `${Math.max(18, Math.round(src.width/45))}px Microsoft JhengHei`;
+      pctx.textBaseline = 'top';
+      comps.forEach((c, i) => {
+        const x = c.minX * scale;
+        const y = c.minY * scale;
+        const w = Math.max(1, (c.maxX - c.minX + 1) * scale);
+        const h = Math.max(1, (c.maxY - c.minY + 1) * scale);
+        pctx.strokeStyle = 'rgba(34,197,94,.95)';
+        pctx.strokeRect(x, y, w, h);
+        const label = String(i+1);
+        const tw = pctx.measureText(label).width + 12;
+        pctx.fillStyle = 'rgba(15,23,42,.85)';
+        pctx.fillRect(x, Math.max(0, y-30), tw, 28);
+        pctx.fillStyle = '#fff';
+        pctx.fillText(label, x+6, Math.max(0, y-28));
+      });
+    }
+
+    showCanvasOnOverlay();
+    octx.clearRect(0,0,overlay.width,overlay.height);
+    const info = `模式:${mode==='darkObject'?'深色物件':'淺色物件'}｜門檻:${threshold}｜結果:${currentCount}`;
+    octx.fillStyle = 'rgba(15,23,42,.82)';
+    octx.fillRect(14,14,Math.min(overlay.width-28,420),36);
+    octx.fillStyle = '#f8fafc';
+    octx.font = '15px Microsoft JhengHei';
+    octx.fillText(info, 24, 37);
+  }
+
+  function showCanvasOnOverlay() {
+    const url = previewCanvas.toDataURL('image/png');
+    video.style.display = 'none';
+    const img = new Image();
+    img.onload = () => {
+      octx.clearRect(0,0,overlay.width,overlay.height);
+      const boxW = overlay.width, boxH = overlay.height;
+      const ratio = Math.min(boxW / img.width, boxH / img.height);
+      const drawW = img.width * ratio;
+      const drawH = img.height * ratio;
+      const dx = (boxW - drawW) / 2;
+      const dy = (boxH - drawH) / 2;
+      octx.drawImage(img, dx, dy, drawW, drawH);
+      // 再覆蓋一次標籤資訊由 drawResult 接手
+    };
+    img.src = url;
+  }
+
+  function showLive() {
+    video.style.display = 'block';
+    renderLiveHint();
+    if (video.srcObject) setStatus('狀態：即時畫面顯示中', 'ok');
+  }
+
+  function saveRecord() {
+    const rec = {
+      time: formatTime(new Date()),
+      item: itemName.value.trim() || '未命名品項',
+      count: currentCount,
+      note: batchNote.value.trim()
+    };
+    records.unshift(rec);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(records));
+    renderRecords();
+  }
+
+  function renderRecords() {
+    recordBody.innerHTML = records.map(r =>
+      `<tr><td>${escapeHtml(r.time)}</td><td>${escapeHtml(r.item)}</td><td>${r.count}</td><td>${escapeHtml(r.note||'')}</td></tr>`
+    ).join('');
+    recordCount.textContent = records.length;
+    totalCount.textContent = records.reduce((a,b)=>a + (Number(b.count)||0),0);
+  }
+
+  function exportCSV() {
+    const rows = [['時間','品項','顆數','備註'], ...records.map(r => [r.time, r.item, r.count, r.note || ''])];
+    const csv = '\uFEFF' + rows.map(r => r.map(csvCell).join(',')).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `計數紀錄_${dateStamp()}.csv`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  }
+
+  function dateStamp() {
+    const d = new Date();
+    const p = n => String(n).padStart(2,'0');
+    return `${d.getFullYear()}${p(d.getMonth()+1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
+  }
+
+  function csvCell(v) {
+    const s = String(v ?? '');
+    return /[",\n]/.test(s) ? `"${s.replace(/"/g,'""')}"` : s;
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  }
+
+  function loadRecords() {
+    try {
+      records = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+      if (!Array.isArray(records)) records = [];
+    } catch { records = []; }
+    renderRecords();
+  }
+
+  startBtn.addEventListener('click', startCamera);
+  switchBtn.addEventListener('click', async () => { useFront = !useFront; await startCamera(); });
+  snapBtn.addEventListener('click', captureFrame);
+  retryBtn.addEventListener('click', () => { lastImageData = null; showLive(); });
+  liveBtn.addEventListener('click', showLive);
+  plusBtn.addEventListener('click', () => { currentCount++; countNow.textContent = currentCount; });
+  minusBtn.addEventListener('click', () => { currentCount = Math.max(0, currentCount-1); countNow.textContent = currentCount; });
+  saveBtn.addEventListener('click', saveRecord);
+  clearBtn.addEventListener('click', () => {
+    if (!confirm('確定要清空所有計數紀錄？')) return;
+    records = [];
+    localStorage.removeItem(STORAGE_KEY);
+    renderRecords();
+  });
+  exportBtn.addEventListener('click', exportCSV);
+  thresholdRange.addEventListener('change', processCurrentImage);
+  minAreaRange.addEventListener('change', processCurrentImage);
+  denoiseRange.addEventListener('change', processCurrentImage);
+  detectMode.addEventListener('change', processCurrentImage);
+  scaleSelect.addEventListener('change', processCurrentImage);
+  drawBox.addEventListener('change', processCurrentImage);
+
+  loadRecords();
+  resizeOverlay();
+  renderLiveHint();
+  if (!isSecureReady()) {
+    setStatus('狀態：請用 https:// 的 github.io 網址開啟，否則相機無法使用。', 'bad');
+  } else {
+    setStatus('狀態：待命中，請按「開啟相機」。', 'warn');
+  }
+})();
+</script>
+</body>
+</html>

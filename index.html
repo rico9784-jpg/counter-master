@@ -43,6 +43,10 @@
     .hint{color:var(--muted);font-size:13px;line-height:1.5}
     .badge{display:inline-block;padding:4px 8px;border-radius:999px;border:1px solid #475569;color:#cbd5e1;font-size:12px;margin-right:6px;margin-bottom:6px}
     .footer{margin-top:10px;color:#94a3b8;font-size:12px}
+    .statusBar{margin-top:10px;padding:10px 12px;border-radius:12px;border:1px solid var(--line);background:#0b1220;color:#cbd5e1;font-size:14px;line-height:1.5;white-space:pre-wrap}
+    .statusBar.ok{border-color:#166534;color:#dcfce7}
+    .statusBar.warn{border-color:#92400e;color:#fde68a}
+    .statusBar.bad{border-color:#991b1b;color:#fecaca}
     @media (max-width: 980px){.grid{grid-template-columns:1fr}.statGrid{grid-template-columns:1fr 1fr 1fr}}
     @media (max-width: 680px){.statGrid,.two{grid-template-columns:1fr 1fr}.title{font-size:22px}}
   </style>
@@ -73,6 +77,7 @@
         <button id="clearBtn" class="bad">清空紀錄</button>
         <button id="exportBtn" class="secondary">匯出CSV</button>
       </div>
+      <div id="statusBar" class="statusBar warn">狀態：尚未開啟相機</div>
       <div class="footer">建議拍攝條件：<span class="badge">正上方拍</span><span class="badge">單層分開</span><span class="badge">背景單純</span><span class="badge">固定燈光</span><span class="badge">先測黑底/白底哪個較穩</span></div>
     </div>
 
@@ -165,6 +170,7 @@
   const saveBtn = document.getElementById('saveBtn');
   const clearBtn = document.getElementById('clearBtn');
   const exportBtn = document.getElementById('exportBtn');
+  const statusBar = document.getElementById('statusBar');
 
   const countNow = document.getElementById('countNow');
   const recordCount = document.getElementById('recordCount');
@@ -242,6 +248,7 @@
       stream.getTracks().forEach(t => t.stop());
       stream = null;
     }
+    video.srcObject = null;
   }
 
   function resizeOverlay() {
@@ -540,6 +547,9 @@
   loadRecords();
   resizeOverlay();
   renderLiveHint();
+  if (!isSecureReady()) {
+    setStatus('狀態：請用 https:// 的 github.io 網址開啟，否則相機無法使用。', 'bad');
+  }
 })();
 </script>
 </body>

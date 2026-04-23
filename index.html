@@ -15,8 +15,12 @@
     .sub{color:var(--muted);margin-bottom:16px}
     .grid{display:grid;grid-template-columns:1.45fr .9fr;gap:16px}
     .card{background:rgba(17,24,39,.9);border:1px solid var(--line);border-radius:18px;padding:14px;box-shadow:0 10px 30px rgba(0,0,0,.22)}
-    .viewer{position:relative;background:#020617;border-radius:16px;overflow:hidden;min-height:320px;border:1px solid #1e293b}
-    video,canvas{width:100%;height:auto;display:block;background:#000}
+    .viewer{position:relative;background:#020617;border-radius:16px;overflow:hidden;min-height:320px;border:1px solid #1e293b;display:flex;align-items:center;justify-content:center}
+    video,canvas{width:100%;display:block;background:#000}
+    video{min-height:320px;max-height:70vh;object-fit:contain}
+    #previewCanvas{display:none}
+    #capturedImage{position:absolute;left:0;top:0;width:100%;height:100%;object-fit:contain;background:#000;display:none}
+
     #overlay{position:absolute;left:0;top:0;pointer-events:none}
     .actions,.quick{display:flex;flex-wrap:wrap;gap:10px;margin-top:12px}
     button,select,input[type="text"],input[type="number"]{
@@ -43,6 +47,10 @@
     .hint{color:var(--muted);font-size:13px;line-height:1.5}
     .badge{display:inline-block;padding:4px 8px;border-radius:999px;border:1px solid #475569;color:#cbd5e1;font-size:12px;margin-right:6px;margin-bottom:6px}
     .footer{margin-top:10px;color:#94a3b8;font-size:12px}
+    .statusBar{margin-top:10px;padding:10px 12px;border-radius:12px;border:1px solid var(--line);background:#0b1220;color:#cbd5e1;font-size:14px;line-height:1.5;white-space:pre-wrap}
+    .statusBar.ok{border-color:#166534;color:#dcfce7}
+    .statusBar.warn{border-color:#92400e;color:#fde68a}
+    .statusBar.bad{border-color:#991b1b;color:#fecaca}
     @media (max-width: 980px){.grid{grid-template-columns:1fr}.statGrid{grid-template-columns:1fr 1fr 1fr}}
     @media (max-width: 680px){.statGrid,.two{grid-template-columns:1fr 1fr}.title{font-size:22px}}
   </style>
@@ -56,6 +64,7 @@
     <div class="card">
       <div class="viewer" id="viewerBox">
         <video id="video" autoplay playsinline muted></video>
+        <img id="capturedImage" alt="captured preview">
         <canvas id="previewCanvas" hidden></canvas>
         <canvas id="overlay"></canvas>
       </div>
@@ -73,6 +82,7 @@
         <button id="clearBtn" class="bad">清空紀錄</button>
         <button id="exportBtn" class="secondary">匯出CSV</button>
       </div>
+      <div id="statusBar" class="statusBar warn">狀態：尚未開啟相機</div>
       <div class="footer">建議拍攝條件：<span class="badge">正上方拍</span><span class="badge">單層分開</span><span class="badge">背景單純</span><span class="badge">固定燈光</span><span class="badge">先測黑底/白底哪個較穩</span></div>
     </div>
 
@@ -151,6 +161,7 @@
 (() => {
   const video = document.getElementById('video');
   const previewCanvas = document.getElementById('previewCanvas');
+  const capturedImage = document.getElementById('capturedImage');
   const overlay = document.getElementById('overlay');
   const pctx = previewCanvas.getContext('2d', { willReadFrequently: true });
   const octx = overlay.getContext('2d');
@@ -165,6 +176,7 @@
   const saveBtn = document.getElementById('saveBtn');
   const clearBtn = document.getElementById('clearBtn');
   const exportBtn = document.getElementById('exportBtn');
+  const statusBar = document.getElementById('statusBar');
 
   const countNow = document.getElementById('countNow');
   const recordCount = document.getElementById('recordCount');
@@ -193,6 +205,16 @@
 
   const STORAGE_KEY = 'counter_master_records_v1';
 
+
+  function setStatus(msg, type = "warn") {
+    statusBar.textContent = msg;
+    statusBar.className = `statusBar ${type}`;
+  }
+
+  function isSecureReady() {
+    return window.isSecureContext || location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+  }
+
   function updateClock() {
     const now = new Date();
     timeText.value = formatTime(now);
@@ -214,34 +236,107 @@
   syncSliderLabels();
 
   async function startCamera() {
+    if (!isSecureReady()) {
+      setStatus('狀態：目前不是安全網址，請改用 https:// 的 github.io 網址開啟。', 'bad');
+      return;
+    }
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      setStatus('狀態：目前瀏覽器不支援相機 API，請改用 Chrome。', 'bad');
+      return;
+    }
+
     stopCamera();
+    setStatus('狀態：正在開啟相機…', 'warn');
+
+    const tries = [
+      { video: { facingMode: useFront ? 'user' : { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false },
+      { video: { facingMode: useFront ? 'user' : 'environment' }, audio: false },
+      { video: true, audio: false }
+    ];
+
+    let lastErr = null;
+    for (const constraints of tries) {
+      try {
+        stream = await navigator.mediaDevices.getUserMedia(constraints);
+        break;
+      } catch (e) {
+        lastErr = e;
+      }
+    }
+
+    if (!stream) {
+      const msg = lastErr?.message || '未知錯誤';
+      setStatus(`狀態：無法開啟相機。可能是權限被拒絕、相機被其他 App 佔用，或瀏覽器限制。
+錯誤：${msg}`, 'bad');
+      return;
+    }
+
     try {
-      stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          facingMode: useFront ? 'user' : { ideal: 'environment' },
-          width: { ideal: 1920 },
-          height: { ideal: 1080 }
-        },
-        audio: false
-      });
+      video.setAttribute('autoplay', '');
+      video.setAttribute('muted', '');
+      video.setAttribute('playsinline', '');
+      video.muted = true;
+      video.playsInline = true;
+      video.autoplay = true;
+      capturedImage.style.display = 'none';
+      video.style.display = 'block';
       video.srcObject = stream;
-      await video.play();
+
+      await waitForVideoReady(video);
+      await video.play().catch(() => {});
+
       resizeOverlay();
       snapBtn.disabled = false;
       liveBtn.disabled = false;
       retryBtn.disabled = true;
       startBtn.textContent = '重新開啟相機';
       renderLiveHint();
+      setStatus(`狀態：相機已開啟，解析度 ${video.videoWidth || '-'} x ${video.videoHeight || '-'}，即時畫面應已顯示。`, 'ok');
     } catch (e) {
-      alert('無法開啟相機，請確認瀏覽器權限已允許。\n\n' + e.message);
+      setStatus(`狀態：相機已授權，但即時畫面未成功顯示。
+錯誤：${e.message}`, 'bad');
     }
   }
 
+  async function waitForVideoReady(videoEl) {
+    if (videoEl.readyState >= 2 && videoEl.videoWidth > 0 && videoEl.videoHeight > 0) {
+      return;
+    }
+    await new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        cleanup();
+        reject(new Error('等待相機畫面逾時'));
+      }, 8000);
+      const ok = async () => {
+        if (videoEl.videoWidth > 0 && videoEl.videoHeight > 0) {
+          cleanup();
+          resolve();
+        }
+      };
+      const cleanup = () => {
+        clearTimeout(timeout);
+        videoEl.removeEventListener('loadedmetadata', ok);
+        videoEl.removeEventListener('loadeddata', ok);
+        videoEl.removeEventListener('canplay', ok);
+        videoEl.removeEventListener('playing', ok);
+      };
+      videoEl.addEventListener('loadedmetadata', ok);
+      videoEl.addEventListener('loadeddata', ok);
+      videoEl.addEventListener('canplay', ok);
+      videoEl.addEventListener('playing', ok);
+      ok();
+    });
+  }
+
   function stopCamera() {
+    capturedImage.style.display = 'none';
+    video.style.display = 'block';
     if (stream) {
       stream.getTracks().forEach(t => t.stop());
       stream = null;
     }
+    video.pause();
+    video.srcObject = null;
   }
 
   function resizeOverlay() {
@@ -264,7 +359,10 @@
   }
 
   async function captureFrame() {
-    if (!video.videoWidth || !video.videoHeight) return;
+    if (!video.videoWidth || !video.videoHeight) {
+      setStatus('狀態：尚未取得相機畫面，請先重新開啟相機。', 'bad');
+      return;
+    }
     const w = video.videoWidth;
     const h = video.videoHeight;
     previewCanvas.width = w;
@@ -440,25 +538,19 @@
 
   function showCanvasOnOverlay() {
     const url = previewCanvas.toDataURL('image/png');
+    capturedImage.src = url;
+    capturedImage.style.display = 'block';
     video.style.display = 'none';
-    const img = new Image();
-    img.onload = () => {
-      octx.clearRect(0,0,overlay.width,overlay.height);
-      const boxW = overlay.width, boxH = overlay.height;
-      const ratio = Math.min(boxW / img.width, boxH / img.height);
-      const drawW = img.width * ratio;
-      const drawH = img.height * ratio;
-      const dx = (boxW - drawW) / 2;
-      const dy = (boxH - drawH) / 2;
-      octx.drawImage(img, dx, dy, drawW, drawH);
-      // 再覆蓋一次標籤資訊由 drawResult 接手
-    };
-    img.src = url;
   }
 
   function showLive() {
+    capturedImage.style.display = 'none';
     video.style.display = 'block';
     renderLiveHint();
+    if (video.srcObject) {
+      video.play().catch(() => {});
+      setStatus('狀態：即時畫面顯示中', 'ok');
+    }
   }
 
   function saveRecord() {
@@ -540,6 +632,11 @@
   loadRecords();
   resizeOverlay();
   renderLiveHint();
+  if (!isSecureReady()) {
+    setStatus('狀態：請用 https:// 的 github.io 網址開啟，否則相機無法使用。', 'bad');
+  } else {
+    setStatus('狀態：待命中，請按「開啟相機」。', 'warn');
+  }
 })();
 </script>
 </body>

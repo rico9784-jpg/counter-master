@@ -16,12 +16,12 @@
     .grid{display:grid;grid-template-columns:1.45fr .9fr;gap:16px}
     .card{background:rgba(17,24,39,.9);border:1px solid var(--line);border-radius:18px;padding:14px;box-shadow:0 10px 30px rgba(0,0,0,.22)}
     .viewer{position:relative;background:#020617;border-radius:16px;overflow:hidden;min-height:320px;border:1px solid #1e293b;display:flex;align-items:center;justify-content:center}
-    video,canvas{width:100%;display:block;background:#000}
-    video{min-height:320px;max-height:70vh;object-fit:contain}
-    #previewCanvas{display:none}
+    video{width:100%;display:block;background:#000;min-height:320px;max-height:70vh;object-fit:contain}
+    canvas{background:#000}
+    #previewCanvas{display:none !important}
     #capturedImage{position:absolute;left:0;top:0;width:100%;height:100%;object-fit:contain;background:#000;display:none}
 
-    #overlay{position:absolute;left:0;top:0;pointer-events:none}
+    #overlay{position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none;background:transparent}
     .actions,.quick{display:flex;flex-wrap:wrap;gap:10px;margin-top:12px}
     button,select,input[type="text"],input[type="number"]{
       border-radius:12px;border:1px solid #475569;background:#0f172a;color:#fff;padding:10px 12px;font-size:16px
@@ -65,7 +65,7 @@
       <div class="viewer" id="viewerBox">
         <video id="video" autoplay playsinline muted></video>
         <img id="capturedImage" alt="captured preview">
-        <canvas id="previewCanvas" hidden></canvas>
+        <canvas id="previewCanvas"></canvas>
         <canvas id="overlay"></canvas>
       </div>
       <div class="actions">
